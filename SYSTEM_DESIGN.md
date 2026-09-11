@@ -69,14 +69,16 @@ A web-based language learning application with a SPA frontend and a lightweight 
 
 | Decision | Proposed | Status |
 |----------|----------|--------|
-| Backend language | Go **or** Rust | **Open** — see §6 |
-| Frontend UI framework | TBD | **Open** |
+| Backend language | Go (Gin) or Rust (Axum) | See §8 for both options |
+| Frontend UI framework | React 19 + TypeScript + Vite | See §8 |
 | Database | SQLite (dev), PostgreSQL (prod) | Proposed |
 | API style | REST/JSON | Proposed |
 | TTS | Browser-native `SpeechSynthesis` API | Decided (no server TTS needed) |
-| Lesson generation | Rule-based extraction + LLM for definitions/examples | **Open** — see §9-D |
+| Lesson generation | Rule-based extraction + LLM for definitions/examples | See §8 |
 | Auth | JWT-based session tokens | Confirmed — see §9 |
 | Target languages | English → Spanish, English → Italian | Confirmed — see §9 |
+| LLM provider | OpenAI GPT-4o-mini (default), Ollama (optional) | See §9-B |
+| Cache key | FNV-1a hash (non-cryptographic) | See §10 |
 
 ---
 
@@ -236,7 +238,59 @@ PUT    /api/users/me
 
 ---
 
-## 8. Deployment
+## 8. Recommended Technology Stack
+
+### Backend
+
+| Layer | Go Option | Rust Option |
+|-------|-----------|-------------|
+| HTTP framework | **Gin** (minimal, fast) | **Axum** (Tokio-native, type-safe) |
+| Database | **sqlx** (compile-time checked queries) | **sqlx** (same, works great) |
+| SQLite driver | **mattn/go-sqlite3** (CGO) | **rusqlite** (pure Rust) |
+| Auth/JWT | **golang-jwt/jwt/v5** | **jsonwebtoken** crate |
+| Config | **dotenvy** or env vars | **config** crate or env vars |
+| LLM client | **reqwest** (HTTP to OpenAI API) | **reqwest** + **serde** |
+| Logging | **slog** or **zap** | **tracing** |
+| CLI/entry | Standard `main.go` | Standard `main.rs` |
+
+### Frontend
+
+| Layer | Recommendation | Rationale |
+|-------|---------------|-----------|
+| Framework | **React 19 + TypeScript** | Largest ecosystem, you know TS |
+| Build tool | **Vite** | Fast HMR, you already use it |
+| Styling | **Tailwind CSS** or **Pico CSS** | Rapid UI, minimal config |
+| State management | **Zustand** or React Context | Lightweight, fits SPA scale |
+| HTTP client | **fetch** or **axios** | Standard |
+| TTS integration | Browser `SpeechSynthesis` API | Native, no deps |
+
+### Database
+
+| Environment | Choice | Rationale |
+|-------------|--------|-----------|
+| Dev | **SQLite** | Zero-config, file-based, fast iteration |
+| Prod | **PostgreSQL** | JSONB for vocabulary, concurrent users |
+| Migrations | **golang-migrate** (Go) or **sqlx-cli** (Rust) | Version-controlled schema |
+
+### LLM
+
+| Option | When to use |
+|--------|-------------|
+| **OpenAI API** (GPT-4o-mini) | Simplest, pay-per-token, good quality |
+| **Ollama** (local) | No API costs, privacy, higher latency |
+| **Google Gemini API** | Alternative, competitive pricing |
+
+### Infrastructure
+
+| Concern | Tool |
+|---------|------|
+| Containerization | **Docker** + **Docker Compose** |
+| Reverse proxy | **Nginx** or **Caddy** |
+| CI/CD | **GitHub Actions** (you already use it) |
+
+---
+
+## 9. Deployment
 
 - **Dev**: Docker Compose — backend + SQLite, frontend served via dev server
 - **Prod**: Docker Compose or single container — backend + PostgreSQL + Nginx reverse proxy for SPA
@@ -251,23 +305,19 @@ PUT    /api/users/me
 - ✅ **Auth**: Simple JWT-based, multi-user
 - ✅ **LLM**: Used for translation (EN→ES/IT) + vocabulary enrichment; translations cached in DB
 - ✅ **Target languages**: English → Spanish, English → Italian
+- ✅ **LLM caching**: Translations stored in `translation_cache` table; cache key = FNV-1a hash (fast, non-cryptographic)
+- ✅ **Backend language**: Go (Gin) or Rust (Axum) — see §8
+- ✅ **Frontend**: React 19 + TypeScript + Vite — see §8
 
 **Still open:**
 
-### A. Backend Language
-Go or Rust? Go = faster to build; Rust = leaner binaries.
-
-### B. UI Framework
-Which direction are you leaning? Options:
-- **React** — largest ecosystem, most resources
-- **Vue** — gentle learning curve, great docs
-- **Svelte** — minimal runtime, compiler-based
-- **Lit** — lightweight web components (you've used it before)
-
-### C. Text Length Limit
+### A. Text Length Limit
 What's a reasonable max input length? (e.g., 500 chars, 2000 chars, 5000 chars?) Affects caching granularity and LLM cost.
 
-### D. Scope for Now
+### B. LLM Provider
+OpenAI (GPT-4o-mini), Ollama (local), or other?
+
+### C. Scope for Now
 Should I focus on:
 1. **Finalize system design** — update doc with your answers
 2. **Backend scaffold** — project structure, DB schema, API stubs
@@ -285,7 +335,8 @@ LLM will be used for:
 
 ### Translation Caching Strategy
 - Every translation request is cached in `translation_cache` table
-- Cache key = SHA-256(source_text + target_lang)
+- Cache key = FNV-1a hash of (source_text + target_lang) — fast, non-cryptographic, sufficient for cache dedup
+- Alternative: use source_text directly as key (enforced length limit prevents abuse)
 - On cache hit: return instantly, no LLM call
 - On cache miss: call LLM, store result, return
 - Benefits: repeated study sessions don't re-incur LLM costs
@@ -293,10 +344,10 @@ LLM will be used for:
 
 ### LLM Call Guidelines
 - Async where possible (don't block HTTP requests on LLM latency)
-- Configurable provider (OpenAI, local LLM, etc.)
+- Configurable provider (OpenAI GPT-4o-mini default, Ollama optional)
 - Per-word caching for definitions (same word → same explanation)
 - Rate limiting to prevent abuse
 
 ---
 
-*Document version: 0.3 — 5 of 6 questions answered.*
+*Document version: 0.4 — 7 of 9 questions answered.*
