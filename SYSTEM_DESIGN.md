@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-A web-based language learning application with a SPA frontend and a lightweight backend. The app supports multiple learning modes centered around vocabulary acquisition from real media (songs, movies), personal favorites, and speech/listening practice via browser TTS.
+A web-based language learning application with a SPA frontend and a lightweight backend. Users submit blocks of text (up to a length limit); the app translates it, extracts vocabulary, and generates lessons. Includes favorites, speech/listening practice via browser TTS, and LLM-powered translation with DB caching.
 
 ---
 
@@ -13,7 +13,7 @@ A web-based language learning application with a SPA frontend and a lightweight 
 | ID | Requirement |
 |----|-------------|
 | FR-1 | User can browse/select words and sentences and add them to a personal favorites list |
-| FR-2 | User can select a song or movie; the app extracts vocabulary and generates structured lessons |
+| FR-2 | User can submit any block of text (up to a length limit); the app translates it and extracts vocabulary into structured lessons |
 | FR-3 | User can enter a listening/speech mode that uses browser TTS APIs for pronunciation practice |
 | FR-4 | User can review favorites as flashcards or quiz sessions |
 | FR-5 | Lessons are tagged by source media, difficulty, and vocabulary |
@@ -50,13 +50,18 @@ A web-based language learning application with a SPA frontend and a lightweight 
 ┌───────────────────────────▼──────────────────────────────┐
 │  Backend (Go or Rust — lightweight HTTP server)          │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌────────────┐  │
-│  │ Auth     │ │ Lesson   │ │ Favorite │ │ Media      │  │
-│  │ Service  │ │ Generator│ │ Service  │ │ Parser     │  │
+│  │ Auth     │ │ Lesson   │ │ Favorite │ │ Translation│  │
+│  │ Service  │ │ Generator│ │ Service  │ │ Service    │  │
 │  └────┬─────┘ └────┬─────┘ └────┬─────┘ └─────┬──────┘  │
-│       │            │            │              │         │
+│       │            │            │              │          │
 │  ┌────▼────────────▼────────────▼──────────────▼──────┐  │
 │  │ Data Layer: SQLite (dev) / PostgreSQL (prod)       │  │
+│  │ + Translation Cache                                │  │
 │  └────────────────────────────────────────────────────┘  │
+│                                                          │
+│       ┌────────────────────────────┐                      │
+│       │ LLM API (external)         │                      │
+│       └────────────────────────────┘                      │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -86,18 +91,26 @@ A web-based language learning application with a SPA frontend and a lightweight 
 - Favorites feed into review/quiz mode
 - Data model: `favorite_id`, `user_id`, `word/sentence text`, `source_media`, `language`, `added_at`
 
-### 4.2 Song/Movie Lesson Generator
+### 4.2 Text Input & Translation
 
-- User provides a URL or paste text from a song/movie
-- Backend extracts vocabulary:
-  - Tokenize text, filter by known word lists (common vocab baseline)
-  - Group into lesson units (by scene/verse/paragraph)
-  - Tag each word with: frequency rank, part of speech, difficulty
-- Optional: call external LLM API for richer explanations/examples
+- User submits any block of text (up to a length limit, e.g. 5000 chars)
+- Backend flow:
+  1. Check translation cache — if cached, return immediately
+  2. Otherwise, call LLM API to translate text (EN → ES/IT)
+  3. Extract vocabulary from both source and translated text
+  4. Generate structured lesson with bilingual pairs
+  5. Store translation and lesson in DB for caching
 - Lesson data model:
-  - `lesson_id`, `title`, `source_type` (song|movie), `source_ref`, `language`, `difficulty`, `vocabulary_items` (JSON array), `created_at`
+  - `lesson_id`, `title`, `source_type` (text), `source_text`, `translated_text`, `language`, `difficulty`, `vocabulary_items` (JSON array), `created_at`
 
-### 4.3 Listening / Speech Mode
+### 4.3 Translation Cache
+
+- Translations stored in DB to avoid redundant LLM calls
+- Cache key: hash of source text + target language
+- TTL or manual invalidation
+- Reduces LLM API costs significantly for repeated/repeatedly studied content
+
+### 4.4 Listening / Speech Mode
 
 - Renders lesson text or favorite sentences in the browser
 - Uses `SpeechSynthesisUtterance` (browser TTS API) for pronunciation
@@ -132,12 +145,12 @@ favorites
 lessons
   id (PK)
   title
-  source_type (song|movie|manual)
-  source_ref (URL or text snippet)
-  language
+  source_type (text)
+  source_text (TEXT — original text submitted)
+  translated_text (TEXT — LLM translation)
+  language (target: es|it)
   difficulty (beginner|intermediate|advanced)
   vocabulary (JSONB — array of {word, pos, frequency, definition})
-  full_text (TEXT — original media text)
   created_at
   user_id (FK → users, nullable — shared lessons?)
 
@@ -149,6 +162,16 @@ lesson_words
   frequency_rank
   difficulty
   definition
+
+translation_cache
+  id (PK)
+  source_hash (SHA-256 of source text + target lang)
+  source_text (TEXT)
+  target_lang (es|it)
+  translated_text (TEXT)
+  tokens_used (INT — LLM cost tracking)
+  created_at
+  accessed_at
 
 speech_sessions
   id (PK)
@@ -195,9 +218,13 @@ DELETE /api/favorites/:id
 
 # Lessons
 GET    /api/lessons
-POST   /api/lessons              # generate from media text/URL
+POST   /api/lessons              # submit text → translate → generate lesson
 GET    /api/lessons/:id
 DELETE /api/lessons/:id
+
+# Translation Cache
+GET    /api/cache/stats          # cache hit rate, tokens used (admin)
+DELETE /api/cache/entries        # clear stale translations
 
 # Speech
 GET    /api/voices?lang=en-US    # available TTS voices (proxy to browser or cache)
@@ -222,7 +249,7 @@ PUT    /api/users/me
 
 **Answered:**
 - ✅ **Auth**: Simple JWT-based, multi-user
-- ✅ **LLM**: Will be used for lesson generation / vocabulary enrichment
+- ✅ **LLM**: Used for translation (EN→ES/IT) + vocabulary enrichment; translations cached in DB
 - ✅ **Target languages**: English → Spanish, English → Italian
 
 **Still open:**
@@ -237,19 +264,10 @@ Which direction are you leaning? Options:
 - **Svelte** — minimal runtime, compiler-based
 - **Lit** — lightweight web components (you've used it before)
 
-### C. Media Input — How does text get into the app?
-When you say "select song or movie," how would the user provide the content?
-1. **Paste text** — user copies & pastes lyrics/dialogue into a textarea
-2. **Upload file** — .txt, .pdf, .srt subtitle file upload
-3. **URL** — app fetches from a link (e.g., YouTube transcript, subtitle site)
-4. **Built-in library** — pre-loaded sample songs/movies in the app
+### C. Text Length Limit
+What's a reasonable max input length? (e.g., 500 chars, 2000 chars, 5000 chars?) Affects caching granularity and LLM cost.
 
-### D. Lesson Generation — How much LLM vs rule-based?
-- **Full LLM** — send text to LLM, get structured lessons back
-- **Hybrid** — rule-based extraction (word frequency, segmentation) + LLM for definitions/examples
-- **Tiered** — simple extraction by default, LLM enrichment on demand
-
-### E. Scope for Now
+### D. Scope for Now
 Should I focus on:
 1. **Finalize system design** — update doc with your answers
 2. **Backend scaffold** — project structure, DB schema, API stubs
@@ -260,16 +278,25 @@ Should I focus on:
 
 ## 10. LLM Integration Notes
 
-LLM will be used for at least:
-- **Lesson generation**: Given extracted vocabulary from media text, LLM generates definitions, example sentences, and difficulty ratings
-- **Vocabulary enrichment**: Contextual explanations, collocations, usage notes
+LLM will be used for:
+- **Translation**: EN → ES/IT for submitted text blocks (primary LLM usage)
+- **Vocabulary enrichment**: Definitions, example sentences, difficulty ratings
 - **Optional**: Grammar explanations, spaced repetition scheduling hints
 
-LLM calls should be:
+### Translation Caching Strategy
+- Every translation request is cached in `translation_cache` table
+- Cache key = SHA-256(source_text + target_lang)
+- On cache hit: return instantly, no LLM call
+- On cache miss: call LLM, store result, return
+- Benefits: repeated study sessions don't re-incur LLM costs
+- `tokens_used` column tracks LLM usage for cost monitoring
+
+### LLM Call Guidelines
 - Async where possible (don't block HTTP requests on LLM latency)
-- Cacheable (same word/phrase → same explanation)
 - Configurable provider (OpenAI, local LLM, etc.)
+- Per-word caching for definitions (same word → same explanation)
+- Rate limiting to prevent abuse
 
 ---
 
-*Document version: 0.2 — 3 of 5 questions answered.*
+*Document version: 0.3 — 5 of 6 questions answered.*
