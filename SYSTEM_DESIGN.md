@@ -86,31 +86,31 @@ A web-based language learning application with a SPA frontend and a lightweight 
 
 ### 4.1 Favorites Mode
 
-- User selects any word/sentence from any lesson or media source
-- POST `/api/favorites` — add item
+- User selects any word/phrase from any lesson
+- POST `/api/favorites` — add vocabulary item to user's favorites
 - GET `/api/favorites` — list with pagination
 - DELETE `/api/favorites/:id` — remove
 - Favorites feed into review/quiz mode
-- Data model: `favorite_id`, `user_id`, `word/sentence text`, `source_media`, `language`, `added_at`
+- Backed by `favorites` table referencing `vocabulary.id`
 
 ### 4.2 Text Input & Translation
 
-- User submits any block of text (up to a length limit, e.g. 5000 chars)
+- User submits any block of text (up to a length limit)
 - Backend flow:
   1. Check translation cache — if cached, return immediately
   2. Otherwise, call LLM API to translate text (EN → ES/IT)
-  3. Extract vocabulary from both source and translated text
-  4. Generate structured lesson with bilingual pairs
-  5. Store translation and lesson in DB for caching
-- Lesson data model:
-  - `lesson_id`, `title`, `source_type` (text), `source_text`, `translated_text`, `language`, `difficulty`, `vocabulary_items` (JSON array), `created_at`
+  3. Extract vocabulary: for each word/phrase, create or update `vocabulary` row with translation
+  4. Create `lesson` row + `lesson_vocabulary` junction rows
+  5. Store full-text translation in `translation_cache` for reuse
+- Core model: every word/phrase is a `vocabulary` row (word → translation)
 
 ### 4.3 Translation Cache
 
-- Translations stored in DB to avoid redundant LLM calls
-- Cache key: hash of source text + target language
+- Full-text translations cached in `translation_cache` table
+- Cache key: FNV-1a hash of (source text + target lang)
+- Avoids re-calling LLM for identical text submissions
+- Word/phrase translations live in `vocabulary` table (no separate cache needed)
 - TTL or manual invalidation
-- Reduces LLM API costs significantly for repeated/repeatedly studied content
 
 ### 4.4 Listening / Speech Mode
 
@@ -135,39 +135,52 @@ users
   password_hash
   created_at
 
+Core unit: **word/phrase → translation** (every row is a vocabulary entry).
+
+```
+users
+  id (PK)
+  username (unique)
+  email (unique)
+  password_hash
+  created_at
+
+vocabulary  ← core table: every word/phrase is a row
+  id (PK)
+  word (TEXT — source language)
+  translation (TEXT — target language)
+  language (target: es|it)
+  part_of_speech
+  frequency_rank
+  difficulty (beginner|intermediate|advanced)
+  example_sentence (TEXT — context)
+  created_at
+
 favorites
   id (PK)
   user_id (FK → users)
-  text
-  language
-  source_type (word|sentence)
-  source_media_id (nullable FK → lessons)
+  vocabulary_id (FK → vocabulary)
   created_at
 
 lessons
   id (PK)
   title
-  source_type (text)
   source_text (TEXT — original text submitted)
   translated_text (TEXT — LLM translation)
   language (target: es|it)
   difficulty (beginner|intermediate|advanced)
-  vocabulary (JSONB — array of {word, pos, frequency, definition})
   created_at
   user_id (FK → users, nullable — shared lessons?)
 
-lesson_words
+lesson_vocabulary  ← junction: which words belong to which lesson
   id (PK)
   lesson_id (FK → lessons)
-  word
-  part_of_speech
-  frequency_rank
-  difficulty
-  definition
+  vocabulary_id (FK → vocabulary)
+  position_in_lesson (INT)
 
-translation_cache
+translation_cache  ← full-text LLM cache (avoids re-calling for same text)
   id (PK)
-  source_hash (SHA-256 of source text + target lang)
+  source_hash (FNV-1a of source text + target lang)
   source_text (TEXT)
   target_lang (es|it)
   translated_text (TEXT)
@@ -264,6 +277,17 @@ PUT    /api/users/me
 | HTTP client | **fetch** or **axios** | Standard |
 | TTS integration | Browser `SpeechSynthesis` API | Native, no deps |
 
+#### Frontend Alternatives (if not React)
+
+| Framework | Pros | Cons |
+|-----------|------|------|
+| **Vue 3 + Vite** | Gentle learning curve, great docs, Composition API | Smaller ecosystem than React |
+| **Svelte 5 + SvelteKit** | Minimal runtime, compiler-based, fast | Smaller community, fewer libs |
+| **Lit** | Lightweight web components, framework-agnostic | Less opinionated, more boilerplate |
+| **SolidJS** | Fine-grained reactivity, no virtual DOM | Smaller ecosystem, JSX-only |
+| **HTMX** | Minimal JS, server-driven UI | Less interactive, not a full SPA |
+| **Qwik** | Resumable, instant startup | Niche, steep learning curve |
+
 ### Database
 
 | Environment | Choice | Rationale |
@@ -334,11 +358,10 @@ LLM will be used for:
 - **Optional**: Grammar explanations, spaced repetition scheduling hints
 
 ### Translation Caching Strategy
-- Every translation request is cached in `translation_cache` table
-- Cache key = FNV-1a hash of (source_text + target_lang) — fast, non-cryptographic, sufficient for cache dedup
-- Alternative: use source_text directly as key (enforced length limit prevents abuse)
+- **Full-text translations** cached in `translation_cache` table (FNV-1a hash key) — avoids re-calling LLM for identical text blocks
+- **Word/phrase translations** live in `vocabulary` table — no separate cache needed; each word is a row
 - On cache hit: return instantly, no LLM call
-- On cache miss: call LLM, store result, return
+- On cache miss: call LLM, store result, extract vocabulary, return
 - Benefits: repeated study sessions don't re-incur LLM costs
 - `tokens_used` column tracks LLM usage for cost monitoring
 
