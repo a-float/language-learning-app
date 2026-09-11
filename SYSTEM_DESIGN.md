@@ -69,8 +69,9 @@ A web-based language learning application with a SPA frontend and a lightweight 
 | Database | SQLite (dev), PostgreSQL (prod) | Proposed |
 | API style | REST/JSON | Proposed |
 | TTS | Browser-native `SpeechSynthesis` API | Decided (no server TTS needed) |
-| Lesson generation | Rule-based extraction from media text + optional LLM augmentation | **Open** |
-| Auth | JWT-based session tokens | Proposed |
+| Lesson generation | Rule-based extraction + LLM for definitions/examples | **Open** — see §9-D |
+| Auth | JWT-based session tokens | Confirmed — see §9 |
+| Target languages | English → Spanish, English → Italian | Confirmed — see §9 |
 
 ---
 
@@ -219,10 +220,15 @@ PUT    /api/users/me
 
 ## 9. Clarifying Questions
 
-Before proceeding to implementation, I need your input on the following:
+**Answered:**
+- ✅ **Auth**: Simple JWT-based, multi-user
+- ✅ **LLM**: Will be used for lesson generation / vocabulary enrichment
+- ✅ **Target languages**: English → Spanish, English → Italian
+
+**Still open:**
 
 ### A. Backend Language
-Go or Rust? Both are viable per the comparison above. Go is faster to build; Rust is leaner.
+Go or Rust? Go = faster to build; Rust = leaner binaries.
 
 ### B. UI Framework
 Which direction are you leaning? Options:
@@ -231,31 +237,39 @@ Which direction are you leaning? Options:
 - **Svelte** — minimal runtime, compiler-based
 - **Lit** — lightweight web components (you've used it before)
 
-### C. Media Integration
-When you say "select song or movie," do you mean:
-1. **Paste text** — user copies lyrics/dialogue, app parses it
-2. **URL input** — app fetches from a link (YouTube transcript API, etc.)
-3. **Manual entry** — user types in sentences manually
+### C. Media Input — How does text get into the app?
+When you say "select song or movie," how would the user provide the content?
+1. **Paste text** — user copies & pastes lyrics/dialogue into a textarea
+2. **Upload file** — .txt, .pdf, .srt subtitle file upload
+3. **URL** — app fetches from a link (e.g., YouTube transcript, subtitle site)
+4. **Built-in library** — pre-loaded sample songs/movies in the app
 
-### D. Lesson Generation Method
-How should vocabulary be extracted and turned into lessons?
-1. **Rule-based** — frequency analysis, word segmentation, predefined word lists
-2. **LLM-powered** — call an LLM API (OpenAI, etc.) to generate explanations, examples, exercises
-3. **Hybrid** — rule-based extraction + optional LLM for enrichment
+### D. Lesson Generation — How much LLM vs rule-based?
+- **Full LLM** — send text to LLM, get structured lessons back
+- **Hybrid** — rule-based extraction (word frequency, segmentation) + LLM for definitions/examples
+- **Tiered** — simple extraction by default, LLM enrichment on demand
 
-### E. Target Languages
-What language pair(s) are you targeting initially? (e.g., English → Spanish, Japanese → English)
-
-### F. Authentication
-Do you need user accounts, or is this personal/solo use? If personal, favorites could be stored locally (IndexedDB) and skip the backend auth entirely.
-
-### G. Scope for Now
+### E. Scope for Now
 Should I focus on:
-1. **Full system design** (this document) — done, awaiting your answers
+1. **Finalize system design** — update doc with your answers
 2. **Backend scaffold** — project structure, DB schema, API stubs
 3. **Frontend scaffold** — SPA skeleton with routing and basic layout
 4. **All of the above**
 
 ---
 
-*Document version: 0.1 — pending your clarifications to finalize.*
+## 10. LLM Integration Notes
+
+LLM will be used for at least:
+- **Lesson generation**: Given extracted vocabulary from media text, LLM generates definitions, example sentences, and difficulty ratings
+- **Vocabulary enrichment**: Contextual explanations, collocations, usage notes
+- **Optional**: Grammar explanations, spaced repetition scheduling hints
+
+LLM calls should be:
+- Async where possible (don't block HTTP requests on LLM latency)
+- Cacheable (same word/phrase → same explanation)
+- Configurable provider (OpenAI, local LLM, etc.)
+
+---
+
+*Document version: 0.2 — 3 of 5 questions answered.*
