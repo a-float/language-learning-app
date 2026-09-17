@@ -10,3 +10,4 @@ devenv.local.yaml
 .pre-commit-config.yaml
 pb_public
 pb_data
+.env
