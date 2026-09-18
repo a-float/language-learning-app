@@ -1,45 +1,27 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { useAuth } from '@/composables/useAuth'
 
-const responses = ref<string[]>([])
-
-async function handleSubmit(e: SubmitEvent) {
-  const form = e.target as HTMLFormElement
-  const formData = new FormData(form)
-  const text = formData.get('text') as string
-  const res = await fetch('http://localhost:8090/api/answer', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ text, targetLanguage: 'Ënglish' }),
-  })
-
-  if (!res.ok) return
-  const { answer } = await res.json()
-  console.log(res)
-  responses.value.push(answer)
-}
+const { user, login, logout } = useAuth()
 </script>
 
 <template>
-  <h1>You did it!</h1>
-  <p>
-    Visit <a href="https://vuejs.org/" target="_blank" rel="noopener">vuejs.org</a> to read the
-    documentation
-  </p>
-  <form @submit.prevent="handleSubmit">
-    <label>
-      Message to ask my ai
-      <textarea defaultValue="Hello AI!" name="text"></textarea>
-    </label>
-    <button>Submit</button>
-  </form>
-  <ul>
-    <li v-for="item in responses" style="background-color: #ccddff; margin-bottom: 2rem">
-      <pre>{{ JSON.stringify(JSON.parse(item), null, 4) }}</pre>
-    </li>
-  </ul>
+  <h1>Hello App!</h1>
+  <template v-if="user">
+    <p>Logged in as {{ user.email }}</p>
+    <button v-on:click="logout">Logout</button>
+  </template>
+  <template v-else>
+    <p>Not logged in</p>
+    <button v-on:click="login">Login</button>
+  </template>
+  <p><strong>Current route path:</strong> {{ $route.fullPath }}</p>
+  <nav>
+    <RouterLink :to="{ name: 'home' }">Go to Home</RouterLink><br />
+    <RouterLink :to="{ name: 'create' }">Go to Create</RouterLink>
+  </nav>
+  <main>
+    <Suspense>
+      <RouterView />
+    </Suspense>
+  </main>
 </template>
-
-<style scoped></style>
