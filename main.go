@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/invopop/jsonschema"
 	"github.com/joho/godotenv"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -14,24 +15,22 @@ import (
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
-
-	"github.com/invopop/jsonschema"
+	"github.com/pocketbase/pocketbase/plugins/migratecmd"
 )
 
 type Word struct {
-	Word        string `json:"phrase" jsonschema_description:"Word worth learning in the source text"`
-	Lemma       string `json:"lemma" jsonschema_description:"Lemma of the word"`
-	Translation string `json:"translation" jsonschema_description:"Translation of the word"`
-	Meaning     string `json:"Meaning" jsonschema_description:"Additional word translation context. Can be empty."`
+	Word        string `json:"phrase" jsonschema_description:"Word worth learning in the source text. Must be one word, but for verbs may include the person."`
+	Lemma       string `json:"lemma" jsonschema_description:"Lemma of the word - for verbs like went, gone, goes it would be just go"`
+	Translation string `json:"translation" jsonschema_description:"Translation of the word."`
 }
 
 type Phrase struct {
-	Phrase      string `json:"phrase" jsonschema_description:"Phrase found in the source text"`
-	Translation string `json:"translation" jsonschema_description:"Short translation of the phrase"`
-	Meaning     string `json:"meaning" jsonschema_description:"Additional phrase translation context. Can be empty."`
+	Phrase      string `json:"phrase" jsonschema_description:"Phrase found in the source text. Must be longer that one word."`
+	Translation string `json:"translation" jsonschema_description:"Short translation of the phrase."`
 }
 
 type LanguageLearningMaterial struct {
+	Name                   string   `json:"name" jsonschema_description:"A short name summarizing the soruce text"`
 	DetectedSourceLanguage string   `json:"detectedSourceLanguage" jsonschema_description:"The detected source language"`
 	Phrases                []Phrase `json:"phrases" jsonschema_description:"Phrases of significance found in the source text"`
 	Words                  []Word   `json:"words" jsonschema_description:"Words of significance found in the source text"`
@@ -64,6 +63,72 @@ func GenerateSchema[T any]() (map[string]any, error) {
 	return result, nil
 }
 
+func saveLearningMaterial(app *pocketbase.PocketBase, text string, material LanguageLearningMaterial) error {
+	app.Logger().Info("Saving material")
+	err := app.RunInTransaction(func(txApp core.App) error {
+		materialsCollection, err := txApp.FindCollectionByNameOrId("learningMaterials")
+		if err != nil {
+			return err
+		}
+
+		wordsCollection, err := txApp.FindCollectionByNameOrId("words")
+		if err != nil {
+			return err
+		}
+
+		phrasesCollection, err := txApp.FindCollectionByNameOrId("phrases")
+		if err != nil {
+			return err
+		}
+
+		wordIDs := []string{}
+		phraseIDs := []string{}
+
+		for _, word := range material.Words {
+			record := core.NewRecord(wordsCollection)
+			record.Set("word", word.Word)
+			record.Set("lemma", word.Lemma)
+			record.Set("translation", word.Translation)
+
+			if err := txApp.Save(record); err != nil {
+				return fmt.Errorf("Failed to save word: %w", err)
+			}
+			wordIDs = append(wordIDs, record.Id)
+		}
+
+		for _, phrase := range material.Phrases {
+			record := core.NewRecord(phrasesCollection)
+			record.Set("phrase", phrase.Phrase)
+			record.Set("translation", phrase.Translation)
+
+			if err := txApp.Save(record); err != nil {
+				return fmt.Errorf("Failed to save phrase: %w", err)
+			}
+			phraseIDs = append(phraseIDs, record.Id)
+		}
+
+		record := core.NewRecord(materialsCollection)
+		record.Set("text", text)
+		record.Set("sourceLanguage", material.DetectedSourceLanguage)
+		record.Set("targetLanguage", "English")
+		record.Set("words", wordIDs)
+		record.Set("phrases", phraseIDs)
+
+		if err := txApp.Save(record); err != nil {
+			return fmt.Errorf("Failed to save learning material: %w", err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	app.Logger().Info(fmt.Sprintf("Created learning material with %d words and %d phrases", len(material.Words), len(material.Phrases)))
+	return nil
+}
+
 func main() {
 	err := godotenv.Load()
 	if err != nil {
@@ -77,7 +142,6 @@ func main() {
 	)
 
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
-		// serves static files from the provided public dir (if exists)
 		se.Router.GET("/static/{path...}", apis.Static(os.DirFS("./pb_public"), false))
 		se.Router.GET("/favicon.ico", func(e *core.RequestEvent) error {
 			http.ServeFile(e.Response, e.Request, "./pb_public/favicon.ico")
@@ -140,10 +204,26 @@ func main() {
 				panic(err)
 			}
 
+			var material LanguageLearningMaterial
+
+			if err := json.Unmarshal([]byte(resp.OutputText()), &material); err != nil {
+				return fmt.Errorf("failed to parse learning material: %w", err)
+			}
+
+			err = saveLearningMaterial(app, data.Text, material)
+
+			if err != nil {
+				panic(err)
+			}
+
 			return e.JSON(http.StatusOK, map[string]any{"answer": resp.OutputText()})
 		})
 
 		return se.Next()
+	})
+
+	migratecmd.MustRegister(app, app.RootCmd, migratecmd.Config{
+		Automigrate: false,
 	})
 
 	if err := app.Start(); err != nil {
