@@ -1,0 +1,17 @@
+{
+  "collection": "vocabulary",
+  "name": "vocabulary",
+  "type": "base",
+  "schema": [
+    { "name": "word", "type": "text", "required": true },
+    { "name": "translation", "type": "text", "required": true },
+    { "name": "language", "type": "text", "required": true },
+    { "name": "part_of_speech", "type": "text", "required": false },
+    { "name": "frequency_rank", "type": "number", "required": false },
+    { "name": "difficulty", "type": "text", "required": false, "options": ["beginner", "intermediate", "advanced"] },
+    { "name": "example_sentence", "type": "text", "required": false }
+  ],
+  "indexes": [
+    ["word", "language"]
+  ]
+}

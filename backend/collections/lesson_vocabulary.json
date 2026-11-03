@@ -1,0 +1,10 @@
+{
+  "collection": "lesson_vocabulary",
+  "name": "lesson_vocabulary",
+  "type": "junction",
+  "schema": [
+    { "name": "lesson_id", "type": "relation", "required": true, "options": { "collectionId": "lessons" } },
+    { "name": "vocabulary_id", "type": "relation", "required": true, "options": { "collectionId": "vocabulary" } },
+    { "name": "position_in_lesson", "type": "number", "required": false }
+  ]
+}

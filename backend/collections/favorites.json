@@ -1,0 +1,12 @@
+{
+  "collection": "favorites",
+  "name": "favorites",
+  "type": "base",
+  "schema": [
+    { "name": "user_id", "type": "relation", "required": true, "options": { "collectionId": "users" } },
+    { "name": "vocabulary_id", "type": "relation", "required": true, "options": { "collectionId": "vocabulary" } }
+  ],
+  "indexes": [
+    ["user_id", "vocabulary_id"]
+  ]
+}

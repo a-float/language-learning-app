@@ -1,0 +1,14 @@
+{
+  "collection": "lessons",
+  "name": "lessons",
+  "type": "base",
+  "schema": [
+    { "name": "title", "type": "text", "required": true },
+    { "name": "source_text", "type": "text", "required": true },
+    { "name": "translated_text", "type": "text", "required": true },
+    { "name": "language", "type": "text", "required": true },
+    { "name": "difficulty", "type": "text", "required": false, "options": ["beginner", "intermediate", "advanced"] },
+    { "name": "user_id", "type": "relation", "required": false, "options": { "collectionId": "users" } },
+    { "name": "source_type", "type": "text", "required": false, "options": ["text", "song", "article"] }
+  ]
+}
