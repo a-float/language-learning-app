@@ -1,0 +1,15 @@
+{
+  "collection": "translation_cache",
+  "name": "translation_cache",
+  "type": "base",
+  "schema": [
+    { "name": "source_hash", "type": "text", "required": true },
+    { "name": "source_text", "type": "text", "required": true },
+    { "name": "target_lang", "type": "text", "required": true },
+    { "name": "translated_text", "type": "text", "required": true },
+    { "name": "tokens_used", "type": "number", "required": false }
+  ],
+  "indexes": [
+    ["source_hash"]
+  ]
+}

@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  pocketbase:
+    build: ./backend
+    ports:
+      - "8080:8080"
+    environment:
+      - POCKETBASE_ADMIN_PASSWORD=${PB_ADMIN_PASSWORD:-admin}
+      - POCKETBASE_DB=${PB_DB:-./data.db}
+    volumes:
+      - pb_data:/pocketbase/data
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - pocketbase
+    restart: unless-stopped
+
+volumes:
+  pb_data:
